@@ -24,6 +24,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Set up Python 3.11 for Chaquopy
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
       - name: Build debug APK
