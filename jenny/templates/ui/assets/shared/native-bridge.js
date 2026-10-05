@@ -55,6 +55,7 @@
     'restartApp',
     'requestBatteryExemption',
     'requestLocationPermission',
+    'ensureGateway',
   ];
 
   /* Domande: tornano una Promise col valore che il metodo nativo restituiva.
