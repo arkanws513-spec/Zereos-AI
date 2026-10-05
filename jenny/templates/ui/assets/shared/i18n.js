@@ -1,23 +1,24 @@
-/* La lingua e' quella del telefono, e non si cambia da dentro l'app: il
-   selettore dell'officina e' uscito col «Trim 2/5» (3d57980) e la casa non ne
-   ha uno per scelta (casa-tu-e-jenny-checklist). Fino al 24/09/2026 qui si
-   leggeva ancora `localStorage.locale`, che solo quel selettore scriveva: chi
-   l'aveva usato restava fermo sulla lingua scelta allora, senza piu' un modo
-   di cambiarla. Se tornera' una scelta per-app sara' `android:localeConfig`,
-   che ricrea l'Activity: un cambio a caldo non serve. */
+/* Zereos language system: Arabic is the first-run default. The user can change
+   language in-app; the choice is persisted locally and takes precedence over
+   the Android/browser locale. */
 export class I18n {
   constructor() {
-    this.locale = this.detectLocale();
+    this.locale = localStorage.getItem('zereos.locale') || 'ar';
     this.translations = {};
   }
 
   detectLocale() {
-    const nav = navigator.language;
-    const supported = ['it', 'en'];
-    return supported.find(s => s === nav) || supported.find(s => nav.startsWith(s)) || 'en';
+    const nav = navigator.language || 'ar';
+    const supported = ['ar', 'en', 'it'];
+    return supported.find(s => s === nav) || supported.find(s => nav.startsWith(s)) || 'ar';
   }
 
   async load(locale) {
+    if (!['ar', 'en', 'it'].includes(locale)) locale = 'ar';
+    this.locale = locale;
+    localStorage.setItem('zereos.locale', locale);
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr';
     try {
       const res = await fetch(`/assets/i18n/${locale}.json`);
       if (!res.ok) {
