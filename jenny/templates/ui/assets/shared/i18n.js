@@ -20,7 +20,7 @@ export class I18n {
     document.documentElement.lang = locale;
     document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr';
     try {
-      const res = await fetch(`/assets/i18n/${locale}.json`);
+      const res = await fetch(`/html-mobile/assets/i18n/${locale}.json`);
       if (!res.ok) {
         // Risposta non valida: non sovrascrivere translations[locale] con dati
         // errati.
