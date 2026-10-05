@@ -236,6 +236,7 @@ _UI_MANIFEST = [
     "assets/home-who.js",
     "assets/i18n/en.json",
     "assets/i18n/it.json",
+    "assets/i18n/ar.json",
     "assets/jenny-body-front-hand.webp",
     "assets/jenny-body-front-idle.webp",
     "assets/jenny-body-front-think.webp",
