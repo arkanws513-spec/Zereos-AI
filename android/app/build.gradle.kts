@@ -44,7 +44,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.flagdizero.jenny"
+        applicationId = "ai.zereos.android"
         minSdk = 26
         targetSdk = 34
         // versionCode must increase monotonically on every published build.
@@ -57,7 +57,7 @@ android {
         // poter provare l'aggiornamento proprio sul dispositivo che lo riceve:
         // l'updater pretende un codice STRETTAMENTE maggiore di quello installato.
         versionCode = 17
-        versionName = "1.0.0"
+        versionName = "1.0.0-zereos"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
