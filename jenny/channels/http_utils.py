@@ -7,6 +7,7 @@ import hmac
 import http
 import json
 import re
+import time
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -224,13 +225,45 @@ def issue_route_secret_matches(headers: Any, configured_secret: str) -> bool:
     return secret_matches(header_token.strip(), configured_secret)
 
 
+_BROWSER_SESSION_COOKIE = "jenny_browser_session"
+_BROWSER_SESSION_TTL_S = 3600
+
+def _cookie_value(headers: Any, name: str) -> str | None:
+    raw = headers.get("Cookie") or headers.get("cookie")
+    if not raw: return None
+    for part in str(raw).split(";"):
+        key, sep, value = part.strip().partition("=")
+        if sep and key == name: return value.strip() or None
+    return None
+
+def issue_browser_session(secret: str, now: int | None = None) -> str:
+    expires = int(time.time() if now is None else now) + _BROWSER_SESSION_TTL_S
+    payload = f"browser:{expires}"
+    signature = hmac.new(secret.encode("utf-8"), payload.encode("ascii"), "sha256").hexdigest()
+    return f"{expires}.{signature}"
+
+def browser_session_matches(headers: Any, secret: str, now: int | None = None) -> bool:
+    if not secret: return False
+    raw = _cookie_value(headers, _BROWSER_SESSION_COOKIE)
+    if not raw or "." not in raw: return False
+    expires_raw, signature = raw.split(".", 1)
+    if not expires_raw.isdigit() or len(signature) != 64: return False
+    expires = int(expires_raw); current = int(time.time() if now is None else now)
+    if expires < current: return False
+    expected = hmac.new(secret.encode("utf-8"), f"browser:{expires_raw}".encode("ascii"), "sha256").hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+def browser_session_cookie_header(secret: str) -> tuple[str, str]:
+    token = issue_browser_session(secret)
+    return ("Set-Cookie", f"{_BROWSER_SESSION_COOKIE}={token}; Max-Age={_BROWSER_SESSION_TTL_S}; Path=/; HttpOnly; Secure; SameSite=Lax")
+
 def check_api_secret(headers: Any, path_with_query: str, secret: str) -> bool:
     """Validate a Bearer header or ?token= query param against the secret."""
     if not secret:
         return False
     supplied = bearer_token(headers) or query_first(parse_query(path_with_query), "token")
     if not supplied:
-        return False
+        return browser_session_matches(headers, secret)
     return secret_matches(supplied, secret)
 
 
