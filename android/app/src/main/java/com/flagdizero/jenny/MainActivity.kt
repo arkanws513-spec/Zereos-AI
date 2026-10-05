@@ -1573,6 +1573,7 @@ class MainActivity : AppCompatActivity() {
             "restartApp" -> restartApp().let { null }
             "requestBatteryExemption" -> requestBatteryExemption().let { null }
             "requestLocationPermission" -> requestLocationPermission().let { null }
+            "ensureGateway" -> GatewayStarter.ensureUp(this@MainActivity, reason = "websocket-reconnect").let { null }
             "requestExactAlarmPermission" -> requestExactAlarmPermission()
             "openBatterySettings" -> openBatterySettings()
             else -> throw IllegalArgumentException("unknown native command")
