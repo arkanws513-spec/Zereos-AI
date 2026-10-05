@@ -39,23 +39,34 @@ jobs:
         working-directory: .
         run: |
           python3 - <<'PY'
-          import json, re
+          import json
+          import re
+          from datetime import datetime, timezone
           from pathlib import Path
+
           gradle = Path("android/app/build.gradle.kts").read_text(encoding="utf-8")
-          code = int(re.search(r"versionCode\\s*=\\s*(\\d+)", gradle).group(1))
-          name = re.search(r'versionName\\s*=\\s*"([^"]+)"', gradle).group(1)
-          Path("latest-version.json").write_text(json.dumps({
-              "version_code": code,
-              "version_name": name,
-              "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
-          }, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
-          PY
+          code_match = re.search(r"versionCode\s*=\s*(\d+)", gradle)
+          name_match = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
+          if not code_match or not name_match:
+              raise SystemExit("Could not read versionCode/versionName from android/app/build.gradle.kts")
+
+          Path("latest-version.json").write_text(
+              json.dumps({
+                  "version_code": int(code_match.group(1)),
+                  "version_name": name_match.group(1),
+                  "updated_at": datetime.now(timezone.utc).isoformat(),
+              }, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add latest-version.json
-          git diff --cached --quiet || git commit -m "chore: update latest Android version metadata"
-          git push
-
+          if ! git diff --cached --quiet; then
+              git commit -m "chore: update latest Android version metadata"
+              git push
+          fi
+          PY
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
