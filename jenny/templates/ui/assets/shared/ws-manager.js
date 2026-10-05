@@ -119,6 +119,9 @@ class WebSocketManager extends EventTarget {
 
     this.chatWs.onclose = () => {
       this.chatConnected = false;
+      // The local Android gateway can die while the WebView remains alive.
+      // Ask the native shell to bring the service back before socket backoff.
+      try { window.JennyNative?.ensureGateway?.(); } catch (_) {}
       // Una richiesta in volo su un socket chiuso non riceverà mai risposta:
       // rifiutarla subito è ciò che evita un editor appeso fino al timeout.
       this._rejectAllRpc('connection closed');
