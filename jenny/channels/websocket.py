@@ -353,7 +353,8 @@ class WebSocketChannel(OutboundSenderMixin):
         """
         supplied = _query_first(query, "token")
         secret = self.config.token_issue_secret.strip()
-        token_matches = bool(secret and supplied and _secret_matches(supplied, secret))
+        cookie_matches = bool(secret and _browser_session_matches(getattr(getattr(connection, 'request', None), 'headers', {}), secret))
+        token_matches = bool(secret and supplied and _secret_matches(supplied, secret)) or cookie_matches
 
         if self.config.websocket_requires_token:
             if not token_matches:
