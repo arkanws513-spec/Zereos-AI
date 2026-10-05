@@ -393,6 +393,10 @@ class HomeApp {
     await i18n.load(i18n.locale);
     this._applyTranslations();
 
+    /* يتحقق التطبيق من وجود إصدار أحدث عند بدء التشغيل. لا ينتظر النتيجة حتى
+       لا يؤخر فتح المحادثة، ولا يظهر شيئًا إذا لم يوجد تحديث أو تعذر الاتصال. */
+    this._checkForAppUpdate();
+
     // La barra di selezione che riappariva al rientro: v. `releaseSelectionOnBlur`.
     releaseSelectionOnBlur();
 
@@ -475,6 +479,34 @@ class HomeApp {
       if (document.visibilityState !== 'hidden') this._retryThread();
     });
     await this._readThread({ fresh: false });
+  }
+
+  async _checkForAppUpdate() {
+    try {
+      const res = await fetch(
+        'https://raw.githubusercontent.com/arkanws513-spec/Zereos-AI/main/latest-version.json?ts=' + Date.now(),
+        { cache: 'no-store' },
+      );
+      if (!res.ok) return;
+      const remote = await res.json();
+      const remoteCode = Number(remote?.version_code);
+      const remoteName = String(remote?.version_name || '').trim();
+      const current = Number(this._settings?.version?.current_code ?? 0);
+      if (!Number.isFinite(remoteCode) || !remoteName || remoteCode <= current) return;
+
+      const key = 'zereos.lastUpdateNoticeCode';
+      if (Number(localStorage.getItem(key)) === remoteCode) return;
+      localStorage.setItem(key, String(remoteCode));
+
+      const message = this._settings?.version?.update_available
+        ? this._settings.version.latest
+          ? 'يتوفر تحديث جديد لـ Zereos: الإصدار ' + this._settings.version.latest
+          : 'يتوفر تحديث جديد لـ Zereos: الإصدار ' + remoteName
+        : 'يتوفر تحديث جديد لـ Zereos: الإصدار ' + remoteName;
+      showToast(message);
+    } catch (_) {
+      /* فشل فحص التحديثات لا يؤثر على تشغيل التطبيق. */
+    }
   }
 
   /** Legge il filo — all'avvio, a un cambio di conversazione, dopo una
