@@ -1,0 +1,403 @@
+"""Test delle route ``/api/subagents*`` (SubagentRoutes).
+
+Stesso pattern di ``tests/webui/test_skills_routes.py``: un ``GatewayHTTPHandler``
+reale con dipendenze finte, e il dispatch su ``handler.subagent_routes`` con il
+path già ripulito dalla query (la query viene letta da ``request.path``).
+
+Il manager è un doppio: queste route non devono conoscere ``jenny/agent``, e i
+suoi errori sono riconosciuti per nome di classe — quindi il doppio solleva
+eccezioni con quei nomi, senza importare nulla dall'agente.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+from support.gateway_http import AUTH_SECRET, make_handler, make_request
+from websockets.http11 import Request as WsRequest
+
+from jenny.webui.ws_http import GatewayHTTPHandler
+
+_SNAPSHOT = {
+    "running": [{
+        "task_id": "d2ee4342",
+        "lineage_id": "aa94c60b",
+        "attempt": 1,
+        "label": "fix parser",
+        "task": "fix the parser so it accepts trailing commas",
+        "agent_type": "coder",
+        "state": "running",
+        "phase": "awaiting_tools",
+        "iteration": 2,
+        "elapsed_s": 0.0,
+        "idle_s": 0.0,
+        "last_tool": "grep",
+        "tool_events": [{"name": "grep", "status": "ok", "detail": "3 matches"}],
+    }],
+    "recent": [{
+        "task_id": "822ead40",
+        "lineage_id": "b202f4e6",
+        "attempt": 1,
+        "label": "price research",
+        "task": "find the current price of a Titan 2",
+        "agent_type": "researcher",
+        "state": "failed",
+        "stop_reason": "error",
+        # Presente su ogni voce di ``recent``, anche non cancellata: la route
+        # serve lo snapshot verbatim, quindi la forma va pinnata per intero.
+        "cancel_reason": None,
+        "result_summary": "page not reachable",
+        "ended_at": 1785841304.462998,
+        "can_restart": True,
+    }],
+}
+
+
+# Nomi identici a quelli di jenny/agent/subagent.py: la mappa nome→status di
+# SubagentRoutes è il contratto, e questi doppi lo esercitano senza importare
+# l'agente (che è esattamente il vincolo di layering della route).
+class SubagentRestartError(RuntimeError):
+    pass
+
+
+class SubagentConcurrencyLimitError(RuntimeError):
+    pass
+
+
+class FakeManager:
+    """Doppio del SubagentManager con la sola superficie usata dalle route."""
+
+    def __init__(self, *, snapshot=None) -> None:
+        self._snapshot = _SNAPSHOT if snapshot is None else snapshot
+        self.snapshot_calls: list = []
+        self.restart_calls: list = []
+        self.cancel_calls: list = []
+        self.restart_error: Exception | None = None
+        self.cancel_error: Exception | None = None
+        self.cancel_result = True
+
+    def status_snapshot(self, session_key=None):
+        self.snapshot_calls.append(session_key)
+        return self._snapshot
+
+    async def restart(self, target_id, **kwargs):
+        self.restart_calls.append((target_id, kwargs))
+        if self.restart_error is not None:
+            raise self.restart_error
+        return "new1234"
+
+    async def cancel_task(self, task_id):
+        self.cancel_calls.append(task_id)
+        if self.cancel_error is not None:
+            raise self.cancel_error
+        return self.cancel_result
+
+
+def _make_request(path_with_query: str, *, token: str | None = AUTH_SECRET) -> WsRequest:
+    return make_request(path_with_query, token, always_append=True)
+
+
+async def _dispatch(handler, path_with_query: str, *, token: str | None = AUTH_SECRET):
+    clean_path = path_with_query.split("?", 1)[0]
+    request = _make_request(path_with_query, token=token)
+    return await handler.subagent_routes.dispatch(request, clean_path)
+
+
+def _json(response) -> dict:
+    return json.loads(response.body.decode("utf-8"))
+
+
+def _make_handler(get_manager) -> GatewayHTTPHandler:
+    return make_handler(Path("/nonexistent"), get_subagent_manager=get_manager)
+
+
+@pytest.fixture()
+def env():
+    manager = FakeManager()
+    handler = _make_handler(lambda: manager)
+    return SimpleNamespace(handler=handler, manager=manager)
+
+
+# -- routing -----------------------------------------------------------------
+
+
+async def test_dispatch_ignores_unrelated_paths(env) -> None:
+    assert await _dispatch(env.handler, "/api/other") is None
+    assert await _dispatch(env.handler, "/api/subagents-extra") is None
+    assert await _dispatch(env.handler, "/api/subagents/abc/unknown") is None
+
+
+# -- auth --------------------------------------------------------------------
+
+
+async def test_snapshot_requires_token(env) -> None:
+    response = await _dispatch(env.handler, "/api/subagents", token=None)
+    assert response.status_code == 401
+    assert env.manager.snapshot_calls == []
+
+
+async def test_restart_requires_token(env) -> None:
+    response = await _dispatch(env.handler, "/api/subagents/d2ee4342/restart", token=None)
+    assert response.status_code == 401
+    assert env.manager.restart_calls == []
+
+
+async def test_cancel_requires_token(env) -> None:
+    response = await _dispatch(env.handler, "/api/subagents/d2ee4342/cancel", token=None)
+    assert response.status_code == 401
+    assert env.manager.cancel_calls == []
+
+
+async def test_wrong_token_is_rejected(env) -> None:
+    response = await _dispatch(env.handler, "/api/subagents", token="not-the-secret")
+    assert response.status_code == 401
+
+
+# -- GET /api/subagents ------------------------------------------------------
+
+
+async def test_snapshot_is_served_verbatim(env) -> None:
+    response = await _dispatch(env.handler, "/api/subagents")
+    assert response.status_code == 200
+    # Una sola forma, due trasporti: nessuna riscrittura di chiavi o annidamenti.
+    assert _json(response) == _SNAPSHOT
+
+
+async def test_snapshot_defaults_to_no_session_filter(env) -> None:
+    await _dispatch(env.handler, "/api/subagents")
+    assert env.manager.snapshot_calls == [None]
+
+
+async def test_snapshot_translates_webui_session_key(env) -> None:
+    from jenny.session.keys import UNIFIED_SESSION_KEY
+
+    await _dispatch(env.handler, "/api/subagents?session_key=websocket%3Adefault")
+    assert env.manager.snapshot_calls == [UNIFIED_SESSION_KEY]
+
+
+async def test_snapshot_passes_through_other_session_keys(env) -> None:
+    await _dispatch(env.handler, "/api/subagents?session_key=cron%3Anightly")
+    assert env.manager.snapshot_calls == ["cron:nightly"]
+
+
+async def test_snapshot_without_manager_is_empty_not_an_error() -> None:
+    handler = _make_handler(lambda: None)
+    response = await _dispatch(handler, "/api/subagents")
+    assert response.status_code == 200
+    assert _json(response) == {"running": [], "recent": []}
+
+
+async def test_snapshot_without_getter_is_empty() -> None:
+    handler = _make_handler(None)
+    response = await _dispatch(handler, "/api/subagents")
+    assert response.status_code == 200
+    assert _json(response) == {"running": [], "recent": []}
+
+
+async def test_snapshot_failure_maps_to_500_generic(env) -> None:
+    def boom(_session_key=None):
+        raise RuntimeError("dettaglio interno")
+
+    env.manager.status_snapshot = boom
+    response = await _dispatch(env.handler, "/api/subagents")
+    assert response.status_code == 500
+    assert b"dettaglio interno" not in response.body
+
+
+async def test_snapshot_of_wrong_type_degrades_to_empty(env) -> None:
+    env.manager.status_snapshot = lambda _session_key=None: ["not", "a", "dict"]
+    response = await _dispatch(env.handler, "/api/subagents")
+    assert response.status_code == 200
+    assert _json(response) == {"running": [], "recent": []}
+
+
+# -- restart -----------------------------------------------------------------
+
+
+async def test_restart_is_always_manual(env) -> None:
+    response = await _dispatch(env.handler, "/api/subagents/822ead40/restart")
+    assert response.status_code == 200
+    assert _json(response) == {"restarted": True, "task_id": "new1234"}
+    # manual=True: il tetto dei tentativi automatici non rifiuta mai un umano.
+    assert env.manager.restart_calls == [("822ead40", {"manual": True})]
+
+
+async def test_restart_accepts_a_lineage_id(env) -> None:
+    response = await _dispatch(env.handler, "/api/subagents/b202f4e6/restart")
+    assert response.status_code == 200
+    assert env.manager.restart_calls[0][0] == "b202f4e6"
+
+
+async def test_restart_error_is_a_clean_409(env) -> None:
+    env.manager.restart_error = SubagentRestartError("unknown subagent or lineage: nope")
+    response = await _dispatch(env.handler, "/api/subagents/nope/restart")
+    assert response.status_code == 409
+    assert b"unknown subagent or lineage" in response.body
+
+
+async def test_concurrency_limit_is_a_clean_429(env) -> None:
+    env.manager.restart_error = SubagentConcurrencyLimitError(
+        "concurrency limit reached (5/5 running)"
+    )
+    response = await _dispatch(env.handler, "/api/subagents/822ead40/restart")
+    assert response.status_code == 429
+    assert b"concurrency limit reached" in response.body
+
+
+async def test_unexpected_restart_error_maps_to_500_generic(env) -> None:
+    env.manager.restart_error = ValueError("dettaglio interno")
+    response = await _dispatch(env.handler, "/api/subagents/822ead40/restart")
+    assert response.status_code == 500
+    assert b"dettaglio interno" not in response.body
+
+
+async def test_unmapped_runtime_error_maps_to_500_generic(env) -> None:
+    # Un RuntimeError qualsiasi non è un errore del contratto subagent: 500.
+    env.manager.restart_error = RuntimeError("dettaglio interno")
+    response = await _dispatch(env.handler, "/api/subagents/822ead40/restart")
+    assert response.status_code == 500
+    assert b"dettaglio interno" not in response.body
+
+
+async def test_restart_without_manager_is_503() -> None:
+    handler = _make_handler(lambda: None)
+    response = await _dispatch(handler, "/api/subagents/822ead40/restart")
+    assert response.status_code == 503
+
+
+# -- cancel ------------------------------------------------------------------
+
+
+async def test_cancel_happy_path(env) -> None:
+    response = await _dispatch(env.handler, "/api/subagents/d2ee4342/cancel")
+    assert response.status_code == 200
+    assert _json(response) == {"cancelled": True}
+    assert env.manager.cancel_calls == ["d2ee4342"]
+
+
+async def test_cancel_reports_a_miss_without_failing(env) -> None:
+    env.manager.cancel_result = False
+    response = await _dispatch(env.handler, "/api/subagents/d2ee4342/cancel")
+    assert response.status_code == 200
+    assert _json(response) == {"cancelled": False}
+
+
+async def test_cancel_unexpected_error_maps_to_500_generic(env) -> None:
+    env.manager.cancel_error = ValueError("dettaglio interno")
+    response = await _dispatch(env.handler, "/api/subagents/d2ee4342/cancel")
+    assert response.status_code == 500
+    assert b"dettaglio interno" not in response.body
+
+
+# -- validazione dell'id -----------------------------------------------------
+
+
+@pytest.mark.parametrize("raw_id", ["a%2Fb", "a%5Cb", "with%20space", "a" * 65, "abc%0A"])
+async def test_invalid_ids_are_rejected(env, raw_id: str) -> None:
+    for action in ("restart", "cancel"):
+        response = await _dispatch(env.handler, f"/api/subagents/{raw_id}/{action}")
+        assert response.status_code == 400, (raw_id, action)
+    assert env.manager.restart_calls == []
+    assert env.manager.cancel_calls == []
+
+
+# -- integrazione col dispatch principale ------------------------------------
+
+
+async def test_routes_are_reachable_from_the_main_dispatch(env) -> None:
+    request = _make_request("/api/subagents")
+    response = await env.handler._dispatch_misc_routes(MagicMock(), request, "/api/subagents")
+    assert response is not None and response.status_code == 200
+    assert _json(response) == _SNAPSHOT
+
+
+# -- appartenenza alla conversazione -----------------------------------------
+#
+# Con ``?session_key=`` le azioni e le letture rispondono solo per i subagent di
+# quella conversazione: l'officina che guarda un quaderno non deve poter fermare
+# il subagent della chat personale. Senza chiave resta tutto com'era (i test qui
+# sopra), così chi non dichiara una conversazione non perde niente.
+
+
+class ScopedManager(FakeManager):
+    """Doppio che filtra per sessione come quello vero: vivi e finiti per chiave."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._running = {
+            "unified:default": [{"task_id": "aaaa1111", "lineage_id": "11110000"}],
+            "project:piante": [{"task_id": "bbbb2222", "lineage_id": "22220000"}],
+        }
+        self._records = {
+            "project:piante": [SimpleNamespace(task_id="cccc3333", lineage_id="33330000")],
+        }
+
+    def status_snapshot(self, session_key=None):
+        self.snapshot_calls.append(session_key)
+        return {"running": self._running.get(session_key, []), "recent": []}
+
+    def list_records(self, session_key=None):
+        return self._records.get(session_key, [])
+
+
+@pytest.fixture()
+def scoped():
+    manager = ScopedManager()
+    return SimpleNamespace(handler=_make_handler(lambda: manager), manager=manager)
+
+
+@pytest.mark.parametrize("action", ["restart", "cancel"])
+async def test_an_action_on_another_conversations_subagent_is_refused(scoped, action) -> None:
+    response = await _dispatch(
+        scoped.handler, f"/api/subagents/aaaa1111/{action}?session_key=project%3Apiante"
+    )
+    assert response.status_code == 404
+    assert scoped.manager.restart_calls == []
+    assert scoped.manager.cancel_calls == []
+
+
+@pytest.mark.parametrize("target", ["bbbb2222", "22220000", "cccc3333", "33330000"])
+async def test_an_action_on_this_conversations_subagent_goes_through(scoped, target) -> None:
+    # Vivo o finito, per task o per lineage: le stesse quattro strade del tool.
+    response = await _dispatch(
+        scoped.handler, f"/api/subagents/{target}/cancel?session_key=project%3Apiante"
+    )
+    assert response.status_code == 200
+    assert scoped.manager.cancel_calls == [target]
+
+
+async def test_the_personal_key_is_translated_before_the_check(scoped) -> None:
+    response = await _dispatch(
+        scoped.handler, "/api/subagents/aaaa1111/restart?session_key=websocket%3Adefault"
+    )
+    assert response.status_code == 200
+    assert scoped.manager.restart_calls == [("aaaa1111", {"manual": True})]
+    response = await _dispatch(
+        scoped.handler, "/api/subagents/bbbb2222/cancel?session_key=websocket%3Adefault"
+    )
+    assert response.status_code == 404
+    assert scoped.manager.cancel_calls == []
+
+
+async def test_without_a_key_nothing_is_checked(scoped) -> None:
+    response = await _dispatch(scoped.handler, "/api/subagents/aaaa1111/cancel")
+    assert response.status_code == 200
+    assert scoped.manager.cancel_calls == ["aaaa1111"]
+    assert scoped.manager.snapshot_calls == []
+
+
+async def test_a_failing_check_is_a_500_not_a_pass(scoped) -> None:
+    def broken(session_key=None):
+        raise ValueError("dettaglio interno")
+
+    scoped.manager.list_records = broken
+    response = await _dispatch(
+        scoped.handler, "/api/subagents/zzzz9999/cancel?session_key=project%3Apiante"
+    )
+    assert response.status_code == 500
+    assert b"dettaglio interno" not in response.body
+    assert scoped.manager.cancel_calls == []

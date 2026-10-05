@@ -1,0 +1,237 @@
+# image_source/
+
+Sorgenti "grezze" (disegnate dall'artista) dell'arte di Jenny e i due script
+che le esportano verso il resto del repo. Niente in questa cartella viene
+letto a runtime: è solo il punto di partenza della build degli asset.
+
+## Cosa c'è
+
+- `icon.png` — sorgente dell'icona app (viso + linee, sfondo trasparente).
+- `jenny-side.PNG`, `jenny-side-talk.PNG`, `jenny-hang.PNG`, `jenny-fall.PNG`,
+  `jenny-ground.PNG`, `jenny-walk1.PNG`, `jenny-walk2.PNG`, `hello1/2.PNG`,
+  `idle.PNG` — pose della mascotte, canvas 3000×3000, tutte cablate in
+  `gen_pose_webp.py`.
+- `think.PNG`, `talk_1a.PNG`, `talk_1b.PNG` — pose cotte di prima dei due
+  livelli, **non più esportate** (uscite da `FILES` con `9d6c603`, 08/09/2026):
+  restano perché `tests/webui/test_mascot_layer_sources.py` ricompone i due
+  livelli e li confronta con loro al pixel. `talk_2a`/`talk_2b` (bocca chiusa)
+  sono state tolte il 24/09/2026: nessuno le leggeva, e `talk_2b` era
+  byte-identica a `idle.PNG`.
+  **Una variante per posa**, a colori. Fino all'08/09/2026 ogni posa aveva
+  un gemello `<stem>_color.PNG` e il client rimappava il suffisso `-color` su
+  una preferenza dell'utente; la preferenza è stata ritirata e la line-art coi
+  gemelli B/N è uscita dal repo (recuperabile dalla storia di git). L'icona app resta line-art: `icon.png` è
+  un sorgente a sé e non c'entra con le pose.
+- `body_*.PNG` / `face_*.PNG` — l'arte **a due livelli**: corpi senza faccia e
+  facce da sola, sullo stesso canvas 3000×3000 delle pose. Si compongono a
+  runtime, due `<img>` impilate, e la registrazione è tutta sul canvas: qui
+  nessuno scala, ricentra o compone niente. V. la sezione *Due livelli* sotto.
+- `gen_icons.py` — genera le icone Android da `icon.png`.
+- `gen_pose_webp.py` — esporta le pose della mascotte in webp per la WebUI.
+
+Convenzione dei nomi `talk_*`: il **numero è la bocca** (1=aperta), la
+**lettera è la posa** (a=mano alzata, b=braccia giù).
+
+## Due livelli: corpo + faccia
+
+Le 10 pose `FILES` hanno la faccia disegnata dentro ("cotte"). Accanto, dal
+settembre 2026, c'è una seconda famiglia di sorgenti in cui **il corpo è senza
+faccia** e la faccia è un livello a sé: a mascotte intera la companion le
+sovrappone, così l'espressione è ortogonale al gesto e "triste mentre pensa"
+non è un disegno in più ma una composizione.
+
+**Orientamento.** `front` è la posa dritta (mascotte intera, `out`), `side` è
+quella diagonale che sporge dal bordo. Le facce di un orientamento valgono solo
+per i corpi dello stesso.
+
+**Il nome dice cosa è, non con cosa si accoppia.** `face_front_happy` è la
+faccia **di riposo** di quell'espressione — per `happy` è un sorriso a bocca
+aperta, ed è giusto così: un chibi felice riposa sorridendo. `face_front_happy_talk`
+è **l'altra bocca**. All'animatore del parlato serve la coppia, e l'ordine non
+si vede.
+
+| Cablati in `LAYERS` (esportati) | | |
+|---|---|---|
+| corpi | `body_front_idle`, `body_front_hand`, `body_front_think` | riposo, gesto del parlato, pensa |
+| facce | `face_front_normal`, `face_front_normal_talk` | la coppia del parlato |
+| | `face_front_thinking` | mentre aspetta la risposta |
+| | `face_front_happy`, `face_front_sad`, `face_front_angry` | le tre reazioni |
+| di lato | `body_side_idle` | il corpo di `jenny-side` senza faccia |
+| | `face_side_happy`, `face_side_sad`, `face_side_angry` | le tre reazioni al bordo (dal 28/09/2026) |
+
+In riserva, **importati e non esportati** (10): `face_{front,side}_{happy,sad,angry}_talk`
+(le bocche alternative degli umori: servono al parlato espressivo, che non c'è
+ancora), `face_side_thinking` e i corpi `body_side_hand`,
+`body_front_wave1`, `body_front_wave2`. Non sono webp e non sono nel manifest:
+un asset che nessun ramo del client può mostrare marcisce. Quando serviranno,
+si aggiunge la riga in `LAYERS` e in `_UI_MANIFEST`.
+
+Attenzione ai nomi del saluto: `body_front_wave1` è il corpo di `hello1` e
+`body_front_wave2` quello di `hello2` — nei file dell'artista arrivavano
+incrociati, e all'import si sono raddrizzati.
+
+**Manca la coppia neutra `side`** (`face_side_normal` e il suo `_talk`): non
+serve, perché al bordo senza umore resta la posa cotta `jenny-side`, e con un
+umore la faccia è quella dell'umore (`SIDE_FACE`, dal 28/09/2026: prima al bordo
+l'umore non si mostrava, e l'utente lo cercava). Se
+un giorno servisse, **si deriva dall'arte cotta** invece di disegnarla:
+`body_side_idle` è `jenny-side` senza faccia, quindi basta tenere di
+`jenny-side.PNG` i pixel che si discostano dal corpo e azzerare l'alfa
+altrove. Verificato: ricomposta torna con uno scarto massimo di 15 su 13 pixel
+di frangia (bocca chiusa) e di 2 su nessun pixel (bocca aperta).
+
+**Il test che tiene la registrazione.** `tests/webui/test_mascot_layer_sources.py`
+pretende che `body_front_idle + face_front_normal_talk` ricomponga `talk_1b` e
+`body_front_think + face_front_thinking` ricomponga `think` **al pixel** (soglia
+8/255, cioè frangia di antialias), che i riquadri d'inchiostro dei corpi
+coincidano con quelli delle pose da cui vengono, e che ogni faccia cada nella
+finestra del suo orientamento. Uno spostamento di un pixel in export lo sfonda
+di un ordine di grandezza — è la guardia che nessuno screenshot dà.
+
+## Regola generale: chi decide cosa
+
+La scala, il crop e l'allineamento sono **responsabilità dell'artista sul
+canvas**, mai dello script o del codice a runtime. Gli script qui dentro
+fanno solo operazioni meccaniche (resize uniforme, crop al bounding box,
+composizione su sfondo); non raddrizzano, non ricentrano e non correggono
+proporzioni tra una posa e l'altra. Se una posa sembra fuori scala rispetto
+alle altre, il problema è nel sorgente PNG, non nello script.
+
+## 1. Icona app — `icon.png` → `gen_icons.py`
+
+Regola del sorgente: viso bianco opaco con line-art nera, sfondo trasparente.
+Su sfondo nero l'arte va bene così com'è (il bianco fluttua, i tratti neri
+restano sopra), quindi le icone grandi **non invertono mai i colori**.
+
+Lo script:
+1. Ritaglia `icon.png` al bounding box del contenuto non trasparente.
+2. Genera due famiglie di output sotto `android/app/src/main/res/`:
+   - **A. Adaptive foreground** (`mipmap-<dpi>/ic_launcher_foreground.png`):
+     mascotte scalata al 54% del canvas — valore scelto perché la maschera
+     circolare del launcher misura ~76% del canvas e la sua sagoma quadrata
+     inscritta limita la dimensione massima della mascotte a quella cifra;
+     sotto questa soglia niente viene tagliato dalla maschera.
+   - **B. Icona della status bar**: non esce più da qui. È il fiore ✿,
+     un vettore tenuto a mano in `drawable/ic_stat_jenny.xml` (il perché è
+     nel commento del file): la sagoma della mascotte a 24dp non si leggeva.
+     Non rimettere i PNG `drawable-<dpi>/ic_stat_jenny.png`: vincerebbero sul
+     vettore e tornerebbe l'icona vecchia.
+   - **C. Notification large icon** (`drawable-nodpi/ic_notification_large.png`):
+     sfondo nero pieno + mascotte all'80% del canvas.
+3. Nessuna icona raster legacy (`ic_launcher.png`/`ic_launcher_round.png`):
+   `minSdk 26` usa sempre l'adaptive icon, quindi le legacy aggiungerebbero
+   solo un secondo rendering (ritagliato quadrato) che confligge con quello
+   mascherato. L'adaptive icon è l'unica fonte di verità.
+
+Rilancia lo script dopo ogni modifica a `icon.png` o alle costanti di tuning
+(`FOREGROUND`, le frazioni 0.54/0.80): è idempotente.
+
+## 2. Pose della mascotte — `gen_pose_webp.py`
+
+Regola del canvas: tutti i sorgenti sono **canvas quadrati 3000×3000**,
+disegnati dall'artista già alla scala giusta e coerenti tra loro (stesso
+personaggio, stessa dimensione, teste allineate sullo stesso canvas). Lo
+script **non scala, non ritaglia e non normalizza nulla**: ogni webp è il
+quadrato intero ridotto a 768×768 (`SIZE`) con lo stesso fattore per tutti,
+qualità 80. La scala relativa fra le pose non viene mai toccata a valle.
+
+A runtime (`jenny/templates/ui/assets/shared/mascot-drag.js`) il layer di volo
+`.jenny-fly` coincide esattamente col box della mascotte — tutte le img sono
+`width:100%` dello stesso quadrato condiviso, quindi nessuna scala o offset
+viene calcolata lì. L'unica costante calcolata a **build time** in
+`gen_pose_webp.py` è il pivot della posa appesa (`HAND_PIVOT`): la punta
+della manica alzata ("la mano") su `jenny-hang.png`, misurata a mano perché
+la sagoma in quella zona è ambigua (le ciocche superano la manica in
+altezza). Lo script stampa `PIVOT_X`/`PIVOT_Y` come frazione del canvas: quei
+due valori vanno copiati a mano nelle costanti `PIVOT_X`/`PIVOT_Y` di
+`shared/mascot-drag.js` se `HAND_PIVOT` cambia.
+
+### Regole di utilizzo delle pose (runtime, non generazione)
+
+Gli stati "in posizione" (`shared/jenny-mascot.js`, lo stesso per casa e
+officina dal 24/09/2026), a mascotte intera sono **due livelli**, corpo e
+faccia (v. *Due livelli* sopra):
+
+- **riposo**: `body_front_idle` + `face_front_normal`.
+- **pensa**: `body_front_think` + `face_front_thinking`, mentre aspetta la
+  risposta (da docked il "pensa" si salta).
+- **parla**: la bocca sbatte fra `face_front_normal` e
+  `face_front_normal_talk`, e il corpo alterna `body_front_idle` e
+  `body_front_hand` ogni `TALK_ANIM_SWITCH_MS` (`TALK_BODIES`).
+- **side / side-talk**: riposo sul bordo, metà fuori schermo; da lì il
+  parlato è la versione semplificata `side↔side-talk` (posa unica, cotta).
+
+L'**umore** (frame `mascot_mood`, v. `MOOD_FACES`) cambia solo la faccia:
+`face_front_happy`, `face_front_sad`, `face_front_angry`, per `MOOD_HOLD_MS`.
+Al bordo è `body_side_idle` con `face_side_<umore>` sopra (`SIDE_BODY`,
+`SIDE_FACE`); decaduto l'umore torna la posa cotta.
+Le loro bocche alternative (`*_talk`) sono in riserva: il parlato espressivo
+non c'è ancora.
+
+Le pose `hang`/`fall`/`ground`/`walk1`/`walk2` sono il "volo Pegman" quando
+la mascotte viene trascinata:
+
+- **hang**: pendolo appeso al pivot mentre è tenuta — ruota di `-θ` attorno
+  al pivot, **mai flippata** (l'arte resta nel suo verso originale, solo la
+  caduta si specchia).
+- **fall**: caduta dopo il rilascio — posa dritta, **flip** in base al verso
+  del moto orizzontale (isteresi: sotto `DIR_MIN` px/s il facing non cambia,
+  anti-jitter).
+- **ground**: atterrata (rimbalzo + pausa "rialzati"), stessa regola di flip
+  di `fall` congelata al momento del contatto.
+- **walk1**/**walk2**: alternate ogni `WALK_FRAME_MS` (500ms) durante il
+  rientro verso il bordo.
+- **hello1**/**hello2**: saluto a due frame usato dalla mini Jenny
+  dell'onboarding (`mobile-onboarding.js`): cade dall'alto (`fall`), atterra
+  stordita (`ground`), poi alterna hello1/hello2 e si ferma in `idle`.
+
+### Output
+
+`FILES` mappa nome-posa → PNG sorgente e scrive **10 webp** cotti in
+`jenny/templates/ui/assets/`, uno per posa:
+`jenny-{side,side-talk,hang,fall,ground,walk1,walk2,hello1,hello2,idle}.webp`.
+`LAYERS` ne aggiunge **13 a due livelli**,
+`jenny-<stem coi trattini>.webp` (per esempio `body_front_idle.PNG` →
+`jenny-body-front-idle.webp`). Ogni sorgente deve essere esattamente 3000×3000
+(assert esplicito) o lo script si ferma.
+
+## Rigenerare
+
+Per il flusso pratico "sostituisco un sorgente → rigenero → carico sul
+telefono" (con tabella nomi file e checklist) vedi
+[`SOSTITUIRE_UNA_POSA.md`](./SOSTITUIRE_UNA_POSA.md).
+
+```bash
+# dalla cartella android/image_source/
+python3 gen_icons.py        # -> ../app/src/main/res/**
+python3 gen_pose_webp.py    # -> ../../jenny/templates/ui/assets/*.webp
+```
+
+**Regola del manifest**: ogni webp nuovo va aggiunto anche a `_UI_MANIFEST`
+in `jenny/utils/android_assets.py`. Su Android gli asset della WebUI vengono
+estratti dall'APK seguendo quella lista statica: un file non elencato esiste
+nel bundle ma non arriva mai in `workspace/ui/` sul device (la `<img>` fa
+404 in silenzio).
+
+Dopo aver rigenerato le pose (o le icone), **serve una build/installazione
+dell'APK** per vederle sul dispositivo: Chaquopy ri-estrae il bundle
+`jenny/templates/ui` dentro l'APK a ogni installazione, quindi un semplice
+riavvio dell'app non basta.
+
+```bash
+./gradlew app:installDebug
+```
+
+## Stato attuale
+
+In cartella ci sono tre famiglie: le 10 pose cotte in `FILES`, i 13 livelli
+in `LAYERS`, e ciò che **non** si esporta di proposito — i 10 livelli in
+riserva (v. *Due livelli*) e le tre pose cotte che fanno da riferimento al
+test dei livelli (`think`, `talk_1a`, `talk_1b`). `idle.PNG` oggi serve solo
+alla mini Jenny dell'onboarding (`JENNY_POSES`): la mascotte intera è a due
+livelli.
+
+Se si cablano nuovi sorgenti, aggiornare `FILES` (o `LAYERS`) qui e i
+riferimenti runtime: `ART`/`BODY`/`FACE` in `shared/jenny-mascot.js`,
+`FLY_POSES` in `shared/mascot-drag.js`, `JENNY_POSES` in
+`mobile-onboarding.js`.
