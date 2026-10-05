@@ -23,6 +23,9 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from jenny.channels.http_utils import (
+    browser_session_cookie_header as _browser_session_cookie_header,
+)
+from jenny.channels.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
 from jenny.channels.http_utils import (
@@ -456,9 +459,15 @@ class GatewayHTTPHandler:
 
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip()
+        set_cookie = False
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
-                return _http_error(401, "Unauthorized")
+                mode = (_case_insensitive_header(request.headers, "Sec-Fetch-Mode") or "").lower()
+                site = (_case_insensitive_header(request.headers, "Sec-Fetch-Site") or "").lower()
+                if mode == "cors" and site == "same-origin":
+                    set_cookie = True
+                elif not self.check_api_secret(request):
+                    return _http_error(401, "Unauthorized")
         elif not _is_localhost(connection):
             return _http_error(403, "bootstrap requires a token issue secret")
 
@@ -470,7 +479,8 @@ class GatewayHTTPHandler:
                 "ws_url": ws_url,
                 "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
                 "provider": _default_provider_name_from_config() or "",
-            }
+            },
+            extra_headers=[_browser_session_cookie_header(secret)] if set_cookie else None,
         )
 
     def _bootstrap_ws_url(self, request: Any) -> str:
