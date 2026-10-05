@@ -27,11 +27,13 @@
   write('tc-theme', t);
   document.documentElement.setAttribute('data-theme', t);
 
-  // La lingua della pagina, con la regola di `i18n.detectLocale()`: quella del
-  // telefono, italiano o inglese. Non piu' `localStorage.locale`, che solo il
-  // selettore tolto dall'officina scriveva (v. shared/i18n.js).
-  var nav = navigator.language || '';
-  document.documentElement.lang = nav.indexOf('it') === 0 ? 'it' : 'en';
+  // Zereos AI mobile defaults to Arabic. Respect an explicit saved locale, and
+  // otherwise keep the Arabic shell instead of silently replacing it with the
+  // device language before the i18n module starts.
+  var locale = read('locale') || 'ar';
+  if (locale !== 'ar' && locale !== 'en' && locale !== 'it') locale = 'ar';
+  document.documentElement.lang = locale;
+  document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr';
 
   // Mascotte: anti-flash come il tema. La verità a runtime resta in
   // shared/mascot.js (localStorage + evento 'mascotchange'); qui solo
