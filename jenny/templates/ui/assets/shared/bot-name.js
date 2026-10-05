@@ -10,7 +10,7 @@
  *  e si iscrive ai cambi (`onChange`). Vuoto vuol dire il ripiego, come sul
  *  server (`agents.defaults.bot_name`). */
 
-export const DEFAULT_BOT_NAME = 'Jenny';
+export const DEFAULT_BOT_NAME = 'Zereos';
 
 let current = DEFAULT_BOT_NAME;
 const listeners = new Set();
