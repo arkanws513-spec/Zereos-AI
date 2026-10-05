@@ -491,18 +491,15 @@ class HomeApp {
       const remote = await res.json();
       const remoteCode = Number(remote?.version_code);
       const remoteName = String(remote?.version_name || '').trim();
-      const current = Number(this._settings?.version?.current_code ?? 0);
+      const settings = await this._askSettings();
+      const current = Number(settings?.version?.current_code ?? 0);
       if (!Number.isFinite(remoteCode) || !remoteName || remoteCode <= current) return;
 
       const key = 'zereos.lastUpdateNoticeCode';
       if (Number(localStorage.getItem(key)) === remoteCode) return;
       localStorage.setItem(key, String(remoteCode));
 
-      const message = this._settings?.version?.update_available
-        ? this._settings.version.latest
-          ? 'يتوفر تحديث جديد لـ Zereos: الإصدار ' + this._settings.version.latest
-          : 'يتوفر تحديث جديد لـ Zereos: الإصدار ' + remoteName
-        : 'يتوفر تحديث جديد لـ Zereos: الإصدار ' + remoteName;
+      const message = 'يتوفر تحديث جديد لـ Zereos: الإصدار ' + remoteName;
       showToast(message);
     } catch (_) {
       /* فشل فحص التحديثات لا يؤثر على تشغيل التطبيق. */
