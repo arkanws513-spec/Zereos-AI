@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
-from jenny.config.schema import Config
+from jenny.config.schema import Config, ProviderConfig
 from jenny.providers.base import GenerationSettings, LLMProvider
 from jenny.providers.tls import build_ssl_context
 
@@ -17,10 +18,36 @@ def _make_provider_core(config: Config) -> LLMProvider:
     try:
         p = config.get_active_provider()
     except ValueError:
-        raise RuntimeError(
-            "No provider configured. Add a provider in Settings or edit "
-            "workspace/config.json to set providers.providers[0]."
-        ) from None
+        # Production bootstrap: configure a fresh installation from Railway
+        # secrets without putting API keys in config.json or the APK.
+        gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+        gemini_key2 = os.getenv("GEMINI_API_KEY2", "").strip()
+        openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if gemini_key or gemini_key2:
+            p = ProviderConfig(
+                name="Gemini",
+                format="openai_compat",
+                api_key=gemini_key or gemini_key2,
+                api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
+                api_type="chat_completions",
+            )
+            if not config.agents.defaults.model:
+                config.agents.defaults.model = "gemini-3.6-flash"
+        elif openai_key:
+            p = ProviderConfig(
+                name="OpenAI",
+                format="openai_compat",
+                api_key=openai_key,
+                api_base="https://api.openai.com/v1",
+                api_type="auto",
+            )
+            if not config.agents.defaults.model:
+                config.agents.defaults.model = "gpt-5-mini"
+        else:
+            raise RuntimeError(
+                "No provider configured. Add a provider in Settings or edit "
+                "workspace/config.json to set providers.providers[0]."
+            ) from None
 
     backend = p.format
     defaults = config.agents.defaults
