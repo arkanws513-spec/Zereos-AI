@@ -37,7 +37,7 @@ class ApiClient {
     this._bootstrapping = (async () => {
       const headers = {};
       if (this._bootstrapSecret) headers['X-Jenny-Auth'] = this._bootstrapSecret;
-      const res = await fetch('/webui/bootstrap', { headers });
+      const res = await fetch('/webui/bootstrap', { headers, credentials: 'same-origin' });
       if (!res.ok) throw new Error(`Bootstrap failed: ${res.status}`);
       // Metadati runtime del gateway (model_name, provider, ...): li teniamo
       // per chi vuole lo stato iniziale senza un giro API extra.
@@ -54,13 +54,15 @@ class ApiClient {
 
   async _fetch(url, opts = {}) {
     if (!this._secret) await this.bootstrap();
-    const headers = { ...(opts.headers || {}), 'Authorization': `Bearer ${this._secret}` };
-    let res = await fetch(url, { ...opts, headers });
+    const headers = { ...(opts.headers || {}) };
+    if (this._secret) headers['Authorization'] = `Bearer ${this._secret}`;
+    let res = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
     if (res.status === 401 || res.status === 403) {
       this._secret = null;
       await this.bootstrap();
-      const headers2 = { ...(opts.headers || {}), 'Authorization': `Bearer ${this._secret}` };
-      res = await fetch(url, { ...opts, headers: headers2 });
+      const headers2 = { ...(opts.headers || {}) };
+      if (this._secret) headers2['Authorization'] = `Bearer ${this._secret}`;
+      res = await fetch(url, { ...opts, headers: headers2, credentials: 'same-origin' });
     }
     return res;
   }
