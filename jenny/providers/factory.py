@@ -22,7 +22,10 @@ def _make_provider_core(config: Config) -> LLMProvider:
         # secrets without putting API keys in config.json or the APK.
         gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
         gemini_key2 = os.getenv("GEMINI_API_KEY2", "").strip()
+        qwen_key = os.getenv("QWEN_API_KEY", "").strip()
+        deepseek_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
         openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+
         if gemini_key or gemini_key2:
             p = ProviderConfig(
                 name="Gemini",
@@ -32,7 +35,27 @@ def _make_provider_core(config: Config) -> LLMProvider:
                 api_type="chat_completions",
             )
             if not config.agents.defaults.model:
-                config.agents.defaults.model = "gemini-3.6-flash"
+                config.agents.defaults.model = "gemini-3.8-flash"
+        elif qwen_key:
+            p = ProviderConfig(
+                name="Qwen",
+                format="openai_compat",
+                api_key=qwen_key,
+                api_base="https://maas.qwencloudapi.com/compatible-mode/v1",
+                api_type="chat_completions",
+            )
+            if not config.agents.defaults.model:
+                config.agents.defaults.model = "qwen3.8-max"
+        elif deepseek_key:
+            p = ProviderConfig(
+                name="DeepSeek",
+                format="openai_compat",
+                api_key=deepseek_key,
+                api_base="https://api.deepseek.com",
+                api_type="chat_completions",
+            )
+            if not config.agents.defaults.model:
+                config.agents.defaults.model = "deepseek-flash"
         elif openai_key:
             p = ProviderConfig(
                 name="OpenAI",
@@ -56,11 +79,6 @@ def _make_provider_core(config: Config) -> LLMProvider:
     if not p.api_key:
         raise RuntimeError(f"Provider '{p.name}': api_key is required.")
 
-    # Un unico punto di costruzione per la fiducia TLS, prima del ramo sul
-    # formato: cosi' un ``caBundle`` rotto e' un errore solo, con un messaggio
-    # solo, e non due percorsi da tenere allineati. ``CaBundleError`` e' una
-    # ``RuntimeError``, quindi risale come il caso della chiave mancante qui
-    # sopra e i chiamanti non cambiano.
     ssl_context = build_ssl_context(p.ca_bundle, provider_name=p.name)
 
     if backend == "anthropic":
@@ -76,7 +94,7 @@ def _make_provider_core(config: Config) -> LLMProvider:
             api_type=p.api_type,
             ssl_context=ssl_context,
         )
-    else:  # "openai_compat"
+    else:
         from jenny.providers.openai_compat_provider import OpenAICompatProvider
 
         provider = OpenAICompatProvider(
@@ -95,8 +113,6 @@ def _make_provider_core(config: Config) -> LLMProvider:
         max_tokens=defaults.max_tokens,
         reasoning_effort=defaults.reasoning_effort,
     )
-    # Nome config del provider attivo: la WebUI lo usa per il branding
-    # (evento runtime_model_updated e popover Info sessione).
     provider.provider_name = p.name
     return provider
 
@@ -107,40 +123,14 @@ def make_provider(config: Config) -> LLMProvider:
 
 
 def provider_fingerprint(config: Config) -> str:
-    """Tutto cio' che ``make_provider`` legge, in una forma confrontabile.
-
-    Serve a chi tiene in mano un provider gia' costruito e deve decidere se il
-    config e' cambiato abbastanza da ricostruirlo (``GatewayContainer``). Sta
-    qui, accanto a ``_make_provider_core``, perche' le due funzioni devono
-    dire la stessa cosa: una legge quei campi, l'altra li riassume. Separarle
-    di modulo significherebbe cambiarne una sola.
-
-    La voce del provider si riassume con ``model_dump()`` **intero** e non
-    campo per campo, ed e' il punto di tutta la funzione. L'elenco a mano si
-    dimentica il campo aggiunto dopo, e si e' dimenticato due volte: prima i
-    parametri di generazione, poi ``caBundle`` (issue #12) — una CA salvata
-    lasciava vivo il client di prima, che non se ne fidava, mentre la sonda del
-    catalogo modelli — senza stato, ricostruita a ogni richiesta — funzionava.
-    Da fuori sembrava che la CA arrivasse a un client e non all'altro.
-
-    Il valore e' una stringa opaca: si confronta, non si legge. Contiene
-    ``apiKey``, quindi non va loggato ne' esposto.
-    """
+    """Summarize all config read by make_provider without logging secrets."""
     try:
         provider: dict[str, Any] | None = config.get_active_provider().model_dump()
     except ValueError:
-        # Nessun provider attivo e' uno stato come un altro, non un'uscita
-        # anticipata: il resto dell'impronta va calcolato lo stesso, altrimenti
-        # durante l'onboarding un cambio di modello o di finestra di contesto
-        # darebbe la stessa impronta di prima.
         provider = None
     defaults = config.agents.defaults
     payload = {
         "provider": provider,
-        # Non sono del provider ma della sessione che gli sta attorno: il
-        # modello e la finestra di contesto viaggiano insieme al provider in
-        # ``_apply_provider_switch``, e ``generation`` la scrive il factory
-        # sopra sull'oggetto appena costruito.
         "model": defaults.model,
         "context_window_tokens": defaults.context_window_tokens,
         "temperature": defaults.temperature,
