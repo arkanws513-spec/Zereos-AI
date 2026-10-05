@@ -116,35 +116,20 @@ _SHELL_DOCUMENTS = frozenset({"index.html", "workshop.html", "onboarding.html"})
 
 
 def _is_foreign_navigation(headers: Any) -> bool:
-    """Una navigazione verso la WebUI partita da un documento che non e' il gateway?
-
-    Il caso che la motiva e' la **vista esterna** di una Jenny App: un iframe con
-    ``allow-scripts allow-same-origin`` sull'origine del proxy
-    (``127.0.0.1:<porta effimera>``). All'apertura e' un'altra origine e la
-    same-origin policy la tiene fuori dalla SPA. Ma i flag di sandbox restano
-    all'iframe, non al documento: se la pagina remota (o un suo redirect, che il
-    proxy passa al browser) porta l'iframe su ``http://127.0.0.1:18790/...``,
-    quel documento gira **con l'origine del gateway e con allow-same-origin** —
-    cioe' con ``parent.document``, lo storage e il token della SPA. Serve che li'
-    ci sia HTML che esegua qualcosa di pilotabile (un file fuori manifest in
-    ``workspace/ui/``, che i tool dell'agente sanno scrivere, e' servito dal
-    disco): e' una catena, ma chiuderla costa una riga.
-
-    Fetch Metadata dice chi ha avviato la navigazione. ``none`` e' il guscio
-    nativo (``loadUrl``), ``same-origin`` la SPA stessa (casa ↔ officina); una
-    pagina su un'altra porta di loopback e' ``same-site``, un'origine opaca
-    ``cross-site``. Senza l'header (client che non lo manda) non si decide
-    niente: la regola aggiunge un rifiuto, non toglie un accesso che c'era.
-    """
+    """Block embedded cross-site navigation, but allow normal browser visits."""
     get = getattr(headers, "get", None)
     if get is None:
         return False
     mode = (get("Sec-Fetch-Mode") or "").strip().lower()
     site = (get("Sec-Fetch-Site") or "").strip().lower()
+    dest = (get("Sec-Fetch-Dest") or "").strip().lower()
     if mode != "navigate" or not site:
         return False
+    # A top-level document navigation is the supported public WebUI entry.
+    # Keep blocking cross-site embedded navigations such as iframes.
+    if dest == "document":
+        return False
     return site not in {"same-origin", "none"}
-
 
 def _default_model_name_from_config() -> str | None:
     try:
