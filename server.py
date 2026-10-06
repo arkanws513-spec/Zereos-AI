@@ -3,6 +3,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 
 PORT = int(os.environ.get("PORT", "8080"))
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -96,10 +97,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if self.path == "/api/health":
+        request_path = urlsplit(self.path).path
+        if request_path == "/api/health":
             self.send_json(200, {"ok": True, "providers": configured()})
             return
-        path = "/index.html" if self.path in ("/", "") else self.path
+        path = "/index.html" if request_path in ("/", "") else request_path
         if path.startswith("/"):
             path = path[1:]
         if path != "index.html":
