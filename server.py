@@ -43,7 +43,7 @@ def openai_compatible(provider, key, messages, model=None):
     return data["choices"][0]["message"]["content"]
 
 def gemini(key, messages, model=None):
-    model = model or "gemini-2.0-flash"
+    model = model or "gemini-3.8-flash"
     prompt = "\n\n".join(f"{m['role']}: {m['content']}" for m in messages)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
     data = post_json(url, {"contents": [{"parts": [{"text": prompt}]}]})
