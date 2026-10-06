@@ -1,10 +1,10 @@
-name: Build Zereos Android
+name: Build and publish Zereos Android
 on:
   push:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -25,3 +25,9 @@ jobs:
         with:
           name: zereos-ai-apk
           path: standalone/app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest standalone/app/build/outputs/apk/debug/app-debug.apk             --title "Zereos AI latest"             --notes "Latest standalone Android build from main."
