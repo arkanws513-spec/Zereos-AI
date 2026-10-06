@@ -3,7 +3,7 @@
    the Android/browser locale. */
 export class I18n {
   constructor() {
-    this.locale = localStorage.getItem('zereos.locale') || 'ar';
+    this.locale = localStorage.getItem('locale') || localStorage.getItem('zereos.locale') || 'ar';
     this.translations = {};
   }
 
@@ -16,7 +16,7 @@ export class I18n {
   async load(locale) {
     if (!['ar', 'en', 'it'].includes(locale)) locale = 'ar';
     this.locale = locale;
-    localStorage.setItem('zereos.locale', locale);
+    try { localStorage.setItem('locale', locale); localStorage.setItem('zereos.locale', locale); } catch (_) {}
     document.documentElement.lang = locale;
     document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr';
     try {
@@ -28,6 +28,14 @@ export class I18n {
         return;
       }
       this.translations[locale] = await res.json();
+      // English is the complete fallback catalog. Missing keys in another
+      // locale must never render the raw i18n key in the UI.
+      if (locale !== 'en' && !this.translations.en) {
+        try {
+          const fallback = await fetch('/html-mobile/assets/i18n/en.json');
+          if (fallback.ok) this.translations.en = await fallback.json();
+        } catch (_) { /* selected locale remains usable on its own */ }
+      }
     } catch (e) {
       console.warn(`Failed to load locale ${locale}:`, e);
     }
@@ -35,14 +43,21 @@ export class I18n {
 
   t(key, params) {
     const keys = key.split('.');
-    let value = this.translations[this.locale];
-    for (const k of keys) {
-      if (!value || typeof value !== 'object') return key;
-      value = value[k];
+    const resolve = (catalog) => {
+      let value = catalog;
+      for (const k of keys) {
+        if (!value || typeof value !== 'object') return undefined;
+        value = value[k];
+      }
+      return typeof value === 'string' ? value : undefined;
+    };
+    let value = resolve(this.translations[this.locale]);
+    if (value === undefined && this.locale !== 'en') {
+      value = resolve(this.translations.en);
     }
-    if (typeof value !== 'string') return key;
+    if (value === undefined) return key;
     if (params) {
-      return value.replace(/\{(\w+)\}/g, (_, name) => params[name] ?? `{${name}}`);
+      return value.replace(/\{(\w+)\}/g, (_, name) => params[name] ?? ('{' + name + '}'));
     }
     return value;
   }
