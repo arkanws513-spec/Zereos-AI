@@ -5880,6 +5880,23 @@ body {
   margin: 0;
 }
 
+/* إصلاح عرض الهاتف: لا تسمح للـMini Jenny بأن تغطي زر استعادة النسخة الاحتياطية أو النص أسفله عندما يكون ارتفاع WebView محدودًا. */
+@media (max-height: 760px) {
+  .onboarding-jenny {
+    width: 96px;
+    height: 96px;
+    bottom: 4px;
+  }
+
+  .onboarding-center {
+    padding-bottom: 108px;
+  }
+
+  #btn-restore-backup {
+    margin-top: 12px !important;
+  }
+}
+
 /* ── Mini Jenny dell'onboarding: in piedi sul bordo inferiore.
    Il layer vive in #view-onboarding (fuori dal content ri-renderizzato);
    le pose sono i webp condivisi della mascotte, swappati da JS.
