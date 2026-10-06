@@ -25,6 +25,15 @@ jobs:
         uses: actions/checkout@v6
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+      - name: Verify current Zereos frontend
+        run: |
+          test -f index.html
+          grep -q 'const API_BASE="https://zereos-ai-production.up.railway.app"' index.html
+          grep -q 'زيريوس AI' index.html
+          if grep -q 'اختبار WebGPU' index.html; then
+            echo "ERROR: WebGPU test page detected in index.html"
+            exit 1
+          fi
       - name: Upload site
         uses: actions/upload-pages-artifact@v4
         with:
