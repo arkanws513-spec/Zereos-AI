@@ -35,17 +35,17 @@ def _make_provider_core(config: Config) -> LLMProvider:
                 api_type="chat_completions",
             )
             if not config.agents.defaults.model:
-                config.agents.defaults.model = "gemini-3.8-flash"
+                config.agents.defaults.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         elif qwen_key:
             p = ProviderConfig(
                 name="Qwen",
                 format="openai_compat",
                 api_key=qwen_key,
-                api_base="https://maas.qwencloudapi.com/compatible-mode/v1",
+                api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
                 api_type="chat_completions",
             )
             if not config.agents.defaults.model:
-                config.agents.defaults.model = "qwen3.8-max"
+                config.agents.defaults.model = os.getenv("QWEN_MODEL", "qwen-plus")
         elif deepseek_key:
             p = ProviderConfig(
                 name="DeepSeek",
@@ -55,7 +55,7 @@ def _make_provider_core(config: Config) -> LLMProvider:
                 api_type="chat_completions",
             )
             if not config.agents.defaults.model:
-                config.agents.defaults.model = "deepseek-flash"
+                config.agents.defaults.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         elif openai_key:
             p = ProviderConfig(
                 name="OpenAI",
@@ -65,7 +65,7 @@ def _make_provider_core(config: Config) -> LLMProvider:
                 api_type="auto",
             )
             if not config.agents.defaults.model:
-                config.agents.defaults.model = "gpt-5-mini"
+                config.agents.defaults.model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
         else:
             raise RuntimeError(
                 "No provider configured. Add a provider in Settings or edit "
