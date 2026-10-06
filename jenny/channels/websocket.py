@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     # l'inversione di layering e i cicli). Fase 8.
     from jenny.webui.gateway_services import GatewayServices
 from jenny.channels.http_utils import (
+    browser_session_matches as _browser_session_matches,
     normalize_config_path as _normalize_config_path,
 )
 from jenny.channels.http_utils import (
