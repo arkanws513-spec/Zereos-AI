@@ -6,17 +6,20 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 
 class MainActivity: Activity() {
+    private lateinit var web: WebView
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val w=WebView(this)
-        w.settings.javaScriptEnabled=true
-        w.settings.domStorageEnabled=true
-        w.settings.allowFileAccess=true
-        w.settings.allowContentAccess=true
-        w.webViewClient=WebViewClient()
-        w.webChromeClient=WebChromeClient()
-        w.loadUrl("file:///android_asset/index.html")
-        setContentView(w)
+        web=WebView(this)
+        web.settings.javaScriptEnabled=true
+        web.settings.domStorageEnabled=true
+        web.settings.allowFileAccess=true
+        web.settings.allowContentAccess=true
+        web.webViewClient=WebViewClient()
+        web.webChromeClient=WebChromeClient()
+        web.loadUrl("file:///android_asset/index.html")
+        setContentView(web)
     }
-    override fun onBackPressed(){ val w=(window.decorView.findViewById<WebView>(android.R.id.content)); super.onBackPressed() }
+    override fun onBackPressed() {
+        if (web.canGoBack()) web.goBack() else super.onBackPressed()
+    }
 }
