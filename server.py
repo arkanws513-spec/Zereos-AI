@@ -9,21 +9,21 @@ PORT = int(os.environ.get("PORT", "8080"))
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 PROVIDERS = [
-    ("openai", "OPENAI_API_KEY"),
     ("deepseek", "DEEPSEEK_API_KEY"),
-    ("qwen", "QWEN_API_KEY"),
     ("gemini", "GEMINI_API_KEY"),
     ("gemini2", "GEMINI_API_KEY2"),
+    ("qwen", "QWEN_API_KEY"),
+    ("openai", "OPENAI_API_KEY"),
 ]
 
 def configured():
     return [name for name, key in PROVIDERS if os.environ.get(key)]
 
-def post_json(url, payload, headers=None):
+def post_json(url, payload, headers=None, timeout=20):
     data = json.dumps(payload).encode()
     req = Request(url, data=data, headers={"Content-Type": "application/json", **(headers or {})}, method="POST")
     try:
-        with urlopen(req, timeout=60) as r:
+        with urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode())
     except HTTPError as e:
         body = e.read().decode(errors="replace")
@@ -118,7 +118,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(500); self.end_headers()
 
     def do_POST(self):
-        if self.path != "/api/chat":
+        if urlsplit(self.path).path != "/api/chat":
             self.send_json(404, {"error": "Not found"})
             return
         try:
