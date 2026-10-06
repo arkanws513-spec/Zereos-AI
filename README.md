@@ -14,3 +14,5 @@ OPENAI_API_KEY, DEEPSEEK_API_KEY, QWEN_API_KEY, GEMINI_API_KEY, GEMINI_API_KEY2
 
 ## Run
 `python server.py`
+
+Railway deployment trigger: 2026-10-06
