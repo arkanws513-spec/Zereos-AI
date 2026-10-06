@@ -10,34 +10,58 @@ PROVIDERS = [
     ("openai", "OPENAI_API_KEY"),
 ]
 
-def post_json(url, payload, headers=None, timeout=8):
-    data = json.dumps(payload).encode()
+# Keep each provider fast so fallback stays responsive.
+REQUEST_TIMEOUT = 8
+
+def post_json(url, payload, headers=None, timeout=REQUEST_TIMEOUT):
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", **(headers or {})},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **(headers or {}),
+        },
         method="POST",
     )
     try:
         with urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode())
+            raw = r.read().decode("utf-8")
+            return json.loads(raw)
     except HTTPError as e:
-        raise RuntimeError(f"Provider HTTP {e.code}")
+        # Log only the provider response body; never log credentials.
+        try:
+            detail = e.read().decode("utf-8", errors="replace")[:1000]
+        except Exception:
+            detail = ""
+        raise RuntimeError(f"HTTP {e.code}: {detail}")
     except URLError as e:
-        raise RuntimeError(f"Provider connection error: {e.reason}")
+        raise RuntimeError(f"Connection error: {e.reason}")
+    except Exception as e:
+        raise RuntimeError(f"Request error: {type(e).__name__}: {e}")
 
 def openai_compatible(provider, key, messages, model=None):
     if provider == "openai":
-        base, default = "https://api.openai.com/v1/chat/completions", "gpt-4o-mini"
+        base = "https://api.openai.com/v1/chat/completions"
+        default = "gpt-4o-mini"
     else:
-        base, default = "https://api.deepseek.com/chat/completions", "deepseek-chat"
+        base = "https://api.deepseek.com/chat/completions"
+        default = "deepseek-chat"
+
     payload = {
         "model": model or default,
         "messages": messages,
         "temperature": 0.7,
     }
     data = post_json(base, payload, {"Authorization": f"Bearer {key}"})
-    return data["choices"][0]["message"]["content"]
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError("Provider returned no choices")
+    text = choices[0].get("message", {}).get("content")
+    if not text:
+        raise RuntimeError("Provider returned an empty response")
+    return str(text)
 
 def gemini(key, messages, model=None):
     model = model or "gemini-3.8-flash"
@@ -48,12 +72,27 @@ def gemini(key, messages, model=None):
             "role": role,
             "parts": [{"text": str(m["content"])}],
         })
+
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent?key={key}"
     )
-    data = post_json(url, {"contents": contents})
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    data = post_json(url, {
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.7,
+        },
+    })
+
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise RuntimeError("Gemini returned no candidates")
+
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    text = "".join(str(p.get("text", "")) for p in parts if p.get("text"))
+    if not text:
+        raise RuntimeError("Gemini returned an empty response")
+    return text
 
 def ask(message, history, requested_provider=None, requested_model=None):
     messages = [{
@@ -71,27 +110,72 @@ def ask(message, history, requested_provider=None, requested_model=None):
                 "content": str(item["content"])[:12000],
             })
 
-    messages.append({"role": "user", "content": message})
+    messages.append({"role": "user", "content": str(message)[:12000]})
 
-    available = [name for name, env in PROVIDERS if os.environ.get(env)]
+    available = [
+        name for name, env in PROVIDERS
+        if os.environ.get(env, "").strip()
+    ]
+
     if requested_provider and requested_provider in available:
-        order = [requested_provider] + [x for x in available if x != requested_provider]
+        order = [requested_provider] + [
+            x for x in available if x != requested_provider
+        ]
     else:
         order = available
 
     env_map = dict(PROVIDERS)
+    failures = []
+
     for provider in order:
-        key = os.environ.get(env_map[provider])
-        try:
-            if provider.startswith("gemini"):
-                return gemini(key, messages, requested_model), provider
-            return openai_compatible(provider, key, messages, requested_model), provider
-        except Exception:
+        key = os.environ.get(env_map[provider], "").strip()
+        if not key:
             continue
+
+        # If the caller explicitly supplied a model, honor it.
+        # Otherwise use stable current defaults, with a model fallback for Gemini.
+        models = [requested_model] if requested_model else []
+        if provider.startswith("gemini"):
+            if not models:
+                models = (
+                    ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+                )
+        else:
+            if not models:
+                models = [None]
+
+        for model in models:
+            try:
+                if provider.startswith("gemini"):
+                    reply = gemini(key, messages, model)
+                else:
+                    reply = openai_compatible(provider, key, messages, model)
+
+                return reply, provider
+            except Exception as exc:
+                failure = f"{provider}/{model or 'default'}: {exc}"
+                failures.append(failure)
+                print(f"[zereos] {failure}")
 
     if not available:
         raise RuntimeError("لم يتم إعداد أي مزود ذكاء اصطناعي على الخادم.")
-    raise RuntimeError("تعذر الحصول على رد الآن. تمت تجربة مزودي الذكاء الاصطناعي المتاحين.")
+
+    raise RuntimeError(
+        "تعذر الحصول على رد من مزودي الذكاء الاصطناعي المتاحين."
+    )
+
+def json_response(payload, status):
+    return (
+        json.dumps(payload, ensure_ascii=False),
+        status,
+        {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        },
+    )
 
 def handler(request):
     if request.method == "OPTIONS":
@@ -102,19 +186,16 @@ def handler(request):
         })
 
     if request.method != "POST":
-        return (json.dumps({"error": "Method not allowed"}, ensure_ascii=False), 405, {
-            "Content-Type": "application/json; charset=utf-8",
-            "Access-Control-Allow-Origin": "*",
-        })
+        return json_response({"error": "Method not allowed"}, 405)
 
     try:
         body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return json_response({"error": "Invalid JSON body"}, 400)
+
         message = str(body.get("message", "")).strip()
         if not message:
-            return (json.dumps({"error": "Message is required"}, ensure_ascii=False), 400, {
-                "Content-Type": "application/json; charset=utf-8",
-                "Access-Control-Allow-Origin": "*",
-            })
+            return json_response({"error": "Message is required"}, 400)
 
         reply, provider = ask(
             message,
@@ -122,15 +203,16 @@ def handler(request):
             body.get("provider"),
             body.get("model"),
         )
-        return (json.dumps({
+
+        return json_response({
+            "ok": True,
             "reply": reply,
             "provider": provider,
-        }, ensure_ascii=False), 200, {
-            "Content-Type": "application/json; charset=utf-8",
-            "Access-Control-Allow-Origin": "*",
-        })
+        }, 200)
+
     except Exception as e:
-        return (json.dumps({"error": str(e)}, ensure_ascii=False), 500, {
-            "Content-Type": "application/json; charset=utf-8",
-            "Access-Control-Allow-Origin": "*",
-        })
+        print(f"[zereos] request failed: {type(e).__name__}: {e}")
+        return json_response({
+            "ok": False,
+            "error": "تعذر الحصول على رد من مزودي الذكاء الاصطناعي المتاحين."
+        }, 502)
