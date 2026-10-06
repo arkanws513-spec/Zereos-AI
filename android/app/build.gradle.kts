@@ -40,7 +40,7 @@ val hasReleaseSigning = releaseStoreFile != null &&
     file(releaseStoreFile!!).exists()
 
 android {
-    namespace = "com.flagdizero.jenny"
+    namespace = "ai.zereos.android"
     compileSdk = 34
 
     defaultConfig {
