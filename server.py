@@ -12,14 +12,13 @@ PROVIDERS = [
     ("deepseek", "DEEPSEEK_API_KEY"),
     ("gemini", "GEMINI_API_KEY"),
     ("gemini2", "GEMINI_API_KEY2"),
-    ("qwen", "QWEN_API_KEY"),
     ("openai", "OPENAI_API_KEY"),
 ]
 
 def configured():
     return [name for name, key in PROVIDERS if os.environ.get(key)]
 
-def post_json(url, payload, headers=None, timeout=20):
+def post_json(url, payload, headers=None, timeout=8):
     data = json.dumps(payload).encode()
     req = Request(url, data=data, headers={"Content-Type": "application/json", **(headers or {})}, method="POST")
     try:
@@ -34,19 +33,20 @@ def post_json(url, payload, headers=None, timeout=20):
 def openai_compatible(provider, key, messages, model=None):
     if provider == "openai":
         base, default = "https://api.openai.com/v1/chat/completions", "gpt-4o-mini"
-    elif provider == "deepseek":
-        base, default = "https://api.deepseek.com/chat/completions", "deepseek-chat"
     else:
-        base, default = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", "qwen-plus"
+        base, default = "https://api.deepseek.com/chat/completions", "deepseek-chat"
     payload = {"model": model or default, "messages": messages, "temperature": 0.7}
     data = post_json(base, payload, {"Authorization": f"Bearer {key}"})
     return data["choices"][0]["message"]["content"]
 
 def gemini(key, messages, model=None):
     model = model or "gemini-3.8-flash"
-    prompt = "\n\n".join(f"{m['role']}: {m['content']}" for m in messages)
+    contents = []
+    for m in messages:
+        role = "user" if m["role"] == "user" else "model"
+        contents.append({"role": role, "parts": [{"text": str(m["content"])}]})
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    data = post_json(url, {"contents": [{"parts": [{"text": prompt}]}]})
+    data = post_json(url, {"contents": contents})
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 def ask(message, history, requested_provider=None, requested_model=None):
@@ -57,12 +57,11 @@ def ask(message, history, requested_provider=None, requested_model=None):
     messages.append({"role": "user", "content": message})
 
     available = configured()
-    if requested_provider:
+    if requested_provider and requested_provider in available:
         order = [requested_provider] + [x for x in available if x != requested_provider]
     else:
         order = available
 
-    errors = []
     for provider in order:
         key_name = dict(PROVIDERS).get(provider)
         key = os.environ.get(key_name) if key_name else None
@@ -72,12 +71,12 @@ def ask(message, history, requested_provider=None, requested_model=None):
             if provider.startswith("gemini"):
                 return gemini(key, messages, requested_model), provider
             return openai_compatible(provider, key, messages, requested_model), provider
-        except Exception as e:
-            errors.append(f"{provider}: {e}")
+        except Exception:
+            continue
 
     if not available:
-        raise RuntimeError("No AI provider key is configured on the server.")
-    raise RuntimeError("All configured AI providers failed: " + " | ".join(errors))
+        raise RuntimeError("لم يتم إعداد أي مزود ذكاء اصطناعي على الخادم.")
+    raise RuntimeError("تعذر الحصول على رد الآن. تمت تجربة مزودي الذكاء الاصطناعي المتاحين.")
 
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, status, obj):
@@ -105,7 +104,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/"):
             path = path[1:]
         if path != "index.html":
-            self.send_response(404); self.end_headers(); return
+            self.send_response(404)
+            self.end_headers()
+            return
         try:
             with open(os.path.join(ROOT, "index.html"), "rb") as f:
                 raw = f.read()
@@ -115,7 +116,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(raw)
         except OSError:
-            self.send_response(500); self.end_headers()
+            self.send_response(500)
+            self.end_headers()
 
     def do_POST(self):
         if urlsplit(self.path).path != "/api/chat":
