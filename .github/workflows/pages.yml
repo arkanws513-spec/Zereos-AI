@@ -1,0 +1,49 @@
+name: Deploy Zereos AI to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: .
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  api-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Zereos API
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          url = "https://zereos-ai-production.up.railway.app/api/health"
+          with urllib.request.urlopen(url, timeout=20) as r:
+              data = json.load(r)
+          print(data)
+          if not data.get("ok"):
+              raise SystemExit("Zereos API health check failed")
+          PY
