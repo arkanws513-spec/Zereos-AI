@@ -38,7 +38,7 @@ textarea{flex:1;min-height:42px;max-height:150px;resize:none;border:0;outline:0;
 <header>
   <div class="logo">Z</div>
   <div class="brand"><b>زيريوس AI</b><span>مساعدك الذكي</span></div>
-  <div class="head-actions"><button class="icon-btn" id="clear" title="مسح المحادثة">⌫</button></div>
+  <div class="head-actions"><button class="icon-btn" id="githubKey" title="مفتاح إدارة GitHub">⌘</button><button class="icon-btn" id="clear" title="مسح المحادثة">⌫</button></div>
 </header>
 <main id="chat"><div class="chat-inner" id="chatInner">
   <section class="welcome" id="welcome"><div class="orb">Z</div><h1>مرحبًا، أنا زيريوس</h1><p>اكتب ما تريد وسأساعدك. مفاتيح مزودي الذكاء الاصطناعي محفوظة على الخادم.</p></section>
@@ -48,7 +48,9 @@ textarea{flex:1;min-height:42px;max-height:150px;resize:none;border:0;outline:0;
 </div>
 <script>
 const API_BASE="https://zereos-ai-production.up.railway.app";
-const chat=document.getElementById("chat"),inner=document.getElementById("chatInner"),welcome=document.getElementById("welcome"),input=document.getElementById("input"),send=document.getElementById("send"),status=document.getElementById("status"),clearBtn=document.getElementById("clear");
+const chat=document.getElementById("chat"),inner=document.getElementById("chatInner"),welcome=document.getElementById("welcome"),input=document.getElementById("input"),send=document.getElementById("send"),status=document.getElementById("status"),clearBtn=document.getElementById("clear"),githubKeyBtn=document.getElementById("githubKey");
+let adminToken=sessionStorage.getItem("zereos_admin_token")||"";
+githubKeyBtn.onclick=()=>{const value=prompt("أدخل مفتاح إدارة GitHub الذي تم ضبطه على الخادم (لا تضع GitHub token هنا):",adminToken);if(value===null)return;adminToken=value.trim();if(adminToken)sessionStorage.setItem("zereos_admin_token",adminToken);else sessionStorage.removeItem("zereos_admin_token");status.textContent=adminToken?"تم حفظ مفتاح الإدارة لهذه الجلسة":"تم مسح مفتاح الإدارة"};
 let history=[];
 try{history=JSON.parse(localStorage.getItem("zereos_history")||"[]")}catch{}
 function save(){localStorage.setItem("zereos_history",JSON.stringify(history.slice(-24)))}
@@ -57,7 +59,9 @@ function add(text,who,meta=""){if(welcome)welcome.style.display="none";const row
 function restore(){for(const m of history){if(m.role==="user")add(m.content,"user");else if(m.role==="assistant")add(m.content,"ai")}}
 async function health(){try{const r=await fetch(API_BASE+"/api/health",{cache:"no-store"});const d=await r.json();status.textContent=d.ok?"متصل • "+((d.providers||[]).length)+" مزود متاح":"الخدمة غير متاحة"}catch{status.textContent="تعذر فحص الاتصال"}}
 function resize(){input.style.height="auto";input.style.height=Math.min(input.scrollHeight,150)+"px"}
-async function submit(){const message=input.value.trim();if(!message||send.disabled)return;add(message,"user");history.push({role:"user",content:message});save();input.value="";resize();send.disabled=true;status.innerHTML='<span class="typing">زيريوس يفكر <i></i><i></i><i></i></span>';try{const r=await fetch(API_BASE+"/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message,history:history.slice(0,-1)})});const d=await r.json();if(!r.ok)throw new Error(d.error||"حدث خطأ");add(d.reply,"ai");history.push({role:"assistant",content:d.reply});save();status.textContent="جاهز"+(d.provider?" • "+d.provider:"")}catch(e){add("تعذر الحصول على رد الآن. حاول مرة أخرى.","ai");status.textContent="تعذر الاتصال بالخدمة"}finally{send.disabled=false;input.focus()}}
+async function submit(){const message=input.value.trim();if(!message||send.disabled)return;add(message,"user");history.push({role:"user",content:message});save();input.value="";resize();send.disabled=true;
+if(message.startsWith("!github ")){try{if(!adminToken)throw new Error("اضغط زر ⌘ وأدخل مفتاح إدارة GitHub أولًا.");const spec=JSON.parse(message.slice(8));const r=await fetch(API_BASE+"/api/github/write",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...spec,admin_token:adminToken})});const d=await r.json();if(!r.ok)throw new Error(d.error||"تعذر تنفيذ التعديل");const out="نجحت عملية GitHub: "+d.action+"\nالمستودع: "+d.repo+"\nالملف: "+d.path+"\nCommit: "+(d.commit||"—")+(d.url?"\n"+d.url:"");add(out,"ai");history.push({role:"assistant",content:out});save();status.textContent="تم تنفيذ تعديل GitHub";}catch(e){add("تعذر تنفيذ عملية GitHub: "+e.message,"ai");status.textContent="فشلت عملية GitHub";}finally{send.disabled=false;input.focus()}return;}
+status.innerHTML='<span class="typing">زيريوس يفكر <i></i><i></i><i></i></span>';try{const r=await fetch(API_BASE+"/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message,history:history.slice(0,-1)})});const d=await r.json();if(!r.ok)throw new Error(d.error||"حدث خطأ");add(d.reply,"ai");history.push({role:"assistant",content:d.reply});save();status.textContent="جاهز"+(d.provider?" • "+d.provider:"")}catch(e){add("تعذر الحصول على رد الآن. حاول مرة أخرى.","ai");status.textContent="تعذر الاتصال بالخدمة"}finally{send.disabled=false;input.focus()}}
 send.onclick=submit;input.addEventListener("input",resize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit()}});clearBtn.onclick=()=>{history=[];save();inner.innerHTML="";inner.appendChild(welcome);welcome.style.display="block";status.textContent="تم مسح المحادثة";input.focus()};restore();health();input.focus();
 </script>
 </body>
