@@ -64,7 +64,7 @@ def github_context_for_message(message):
     """Fetch bounded, read-only repository context when the user explicitly asks about GitHub."""
     import re
     text = str(message)
-    match = re.search(r"github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", text, re.I)
+    match = re.search(r"github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", text, re.I)
     try:
         if match:
             owner, repo = match.group(1), match.group(2).removesuffix(".git")
@@ -92,8 +92,8 @@ def github_context_for_message(message):
             except Exception:
                 result["root_files"] = []
             return "\\n\\nGitHub repository context (read-only, retrieved live):\\n" + json.dumps(result, ensure_ascii=False)[:11000]
-        if re.search(r"github|جيت\\s*هاب", text, re.I) and re.search(r"ابحث|بحث|search|مستودع|مستودعات|repository|repositories", text, re.I):
-            query = re.sub(r"(?is).*?(?:ابحث(?:\\s+لي)?|بحث|search)\\s+(?:في\\s+)?(?:جيت\\s*هاب|github)?\\s*(?:عن|for)?\\s*", "", text).strip()
+        if re.search(r"github|جيت\s*هاب", text, re.I) and re.search(r"ابحث|بحث|search|مستودع|مستودعات|repository|repositories", text, re.I):
+            query = re.sub(r"(?is).*?(?:ابحث(?:\s+لي)?|بحث|search)\s+(?:في\s+)?(?:جيت\s*هاب|github)?\s*(?:عن|for)?\s*", "", text).strip()
             query = query[:180]
             if query:
                 from urllib.parse import quote
