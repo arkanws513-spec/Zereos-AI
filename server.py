@@ -191,7 +191,10 @@ class Handler(BaseHTTPRequestHandler):
             if not message:
                 self.send_json(400, {"error": "Message is required"})
                 return
-            github_context = github_context_for_message(message)\n            if github_context:\n                message = message + "\\n\\n" + github_context\n            reply, provider = ask(message, body.get("history", []), body.get("provider"), body.get("model"))
+            github_context = github_context_for_message(message)
+            if github_context:
+                message = message + "\n\n" + github_context
+            reply, provider = ask(message, body.get("history", []), body.get("provider"), body.get("model"))
             self.send_json(200, {"reply": reply, "provider": provider})
         except Exception as e:
             self.send_json(500, {"error": str(e)})
