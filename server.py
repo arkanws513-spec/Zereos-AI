@@ -91,7 +91,7 @@ def github_context_for_message(message):
                 ] if isinstance(contents, list) else []
             except Exception:
                 result["root_files"] = []
-            return "\\n\\nGitHub repository context (read-only, retrieved live):\\n" + json.dumps(result, ensure_ascii=False)[:11000]
+            return "\n\nGitHub repository context (read-only, retrieved live):\n" + json.dumps(result, ensure_ascii=False)[:11000]
         if re.search(r"github|جيت\s*هاب", text, re.I) and re.search(r"ابحث|بحث|search|مستودع|مستودعات|repository|repositories", text, re.I):
             query = re.sub(r"(?is).*?(?:ابحث(?:\s+لي)?|بحث|search)\s+(?:في\s+)?(?:جيت\s*هاب|github)?\s*(?:عن|for)?\s*", "", text).strip()
             query = query[:180]
@@ -105,9 +105,9 @@ def github_context_for_message(message):
                     "language": x.get("language"),
                     "stars": x.get("stargazers_count"),
                 } for x in data.get("items", [])]
-                return "\\n\\nLive GitHub repository search results (read-only):\\n" + json.dumps(items, ensure_ascii=False)[:8000]
+                return "\n\nLive GitHub repository search results (read-only):\n" + json.dumps(items, ensure_ascii=False)[:8000]
     except Exception as exc:
-        return "\\n\\nGitHub lookup failed: " + type(exc).__name__ + ". Tell the user to check GITHUB_TOKEN on the server if the repository is private or rate limits are reached."
+        return "\n\nGitHub lookup failed: " + type(exc).__name__ + ". Tell the user to check GITHUB_TOKEN on the server if the repository is private or rate limits are reached."
     return ""
 
 def ask(message, history, requested_provider=None, requested_model=None):
