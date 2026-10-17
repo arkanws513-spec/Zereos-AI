@@ -91,7 +91,7 @@ def github_context_for_message(message):
                 ] if isinstance(contents, list) else []
             except Exception:
                 result["root_files"] = []
-            file_match = re.search(r"github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/blob/([^/]+)/(.+?)(?:[?#].*)?$", text, re.I)
+            file_match = re.search(r"github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/blob/([^/]+)/(.+?)(?:[?#].*)?$", text, re.I)
             if file_match:
                 branch, file_path = file_match.group(1), file_match.group(2)
                 try:
