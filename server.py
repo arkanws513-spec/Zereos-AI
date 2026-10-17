@@ -49,6 +49,67 @@ def gemini(key, messages, model=None):
     data = post_json(url, {"contents": contents})
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
+
+def github_request(path):
+    """Read-only GitHub API request. Private-repo access requires GITHUB_TOKEN on the server."""
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "Zereos-AI"}
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = Request("https://api.github.com" + path, headers=headers)
+    with urlopen(req, timeout=8) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+def github_context_for_message(message):
+    """Fetch bounded, read-only repository context when the user explicitly asks about GitHub."""
+    import re
+    text = str(message)
+    match = re.search(r"github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", text, re.I)
+    try:
+        if match:
+            owner, repo = match.group(1), match.group(2).removesuffix(".git")
+            meta = github_request(f"/repos/{owner}/{repo}")
+            result = {
+                "repository": meta.get("full_name"),
+                "description": meta.get("description"),
+                "default_branch": meta.get("default_branch"),
+                "language": meta.get("language"),
+                "private": meta.get("private"),
+                "html_url": meta.get("html_url"),
+            }
+            try:
+                readme = github_request(f"/repos/{owner}/{repo}/readme")
+                import base64
+                result["readme"] = base64.b64decode(readme.get("content", "")).decode("utf-8", errors="replace")[:7000]
+            except Exception:
+                result["readme"] = "(README unavailable)"
+            try:
+                contents = github_request(f"/repos/{owner}/{repo}/contents")
+                result["root_files"] = [
+                    {"name": item.get("name"), "type": item.get("type"), "path": item.get("path")}
+                    for item in contents[:60]
+                ] if isinstance(contents, list) else []
+            except Exception:
+                result["root_files"] = []
+            return "\\n\\nGitHub repository context (read-only, retrieved live):\\n" + json.dumps(result, ensure_ascii=False)[:11000]
+        if re.search(r"github|جيت\\s*هاب", text, re.I) and re.search(r"ابحث|بحث|search|مستودع|مستودعات|repository|repositories", text, re.I):
+            query = re.sub(r"(?is).*?(?:ابحث(?:\\s+لي)?|بحث|search)\\s+(?:في\\s+)?(?:جيت\\s*هاب|github)?\\s*(?:عن|for)?\\s*", "", text).strip()
+            query = query[:180]
+            if query:
+                from urllib.parse import quote
+                data = github_request("/search/repositories?q=" + quote(query) + "&per_page=8")
+                items = [{
+                    "full_name": x.get("full_name"),
+                    "description": x.get("description"),
+                    "html_url": x.get("html_url"),
+                    "language": x.get("language"),
+                    "stars": x.get("stargazers_count"),
+                } for x in data.get("items", [])]
+                return "\\n\\nLive GitHub repository search results (read-only):\\n" + json.dumps(items, ensure_ascii=False)[:8000]
+    except Exception as exc:
+        return "\\n\\nGitHub lookup failed: " + type(exc).__name__ + ". Tell the user to check GITHUB_TOKEN on the server if the repository is private or rate limits are reached."
+    return ""
+
 def ask(message, history, requested_provider=None, requested_model=None):
     messages = [{"role": "system", "content": "You are Zereos, a helpful personal AI assistant. Reply clearly and naturally. Prefer Arabic when the user writes Arabic."}]
     for item in history[-12:]:
@@ -130,7 +191,7 @@ class Handler(BaseHTTPRequestHandler):
             if not message:
                 self.send_json(400, {"error": "Message is required"})
                 return
-            reply, provider = ask(message, body.get("history", []), body.get("provider"), body.get("model"))
+            github_context = github_context_for_message(message)\n            if github_context:\n                message = message + "\\n\\n" + github_context\n            reply, provider = ask(message, body.get("history", []), body.get("provider"), body.get("model"))
             self.send_json(200, {"reply": reply, "provider": provider})
         except Exception as e:
             self.send_json(500, {"error": str(e)})
