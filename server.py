@@ -50,15 +50,76 @@ def gemini(key, messages, model=None):
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def github_request(path):
-    """Read-only GitHub API request. Private-repo access requires GITHUB_TOKEN on the server."""
+def github_request(path, method="GET", payload=None):
+    """GitHub API request. Writes require a server-side token with repository contents permissions."""
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "Zereos-AI"}
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    req = Request("https://api.github.com" + path, headers=headers)
-    with urlopen(req, timeout=8) as response:
-        return json.loads(response.read().decode("utf-8"))
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = Request("https://api.github.com" + path, data=data, headers=headers, method=method)
+    try:
+        with urlopen(req, timeout=15) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw else {}
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"GitHub API HTTP {exc.code}: {body[:400]}")
+
+def github_write_action(body):
+    """Perform an authenticated, explicitly requested GitHub file operation."""
+    import hmac
+    expected = os.environ.get("ZEREOS_ADMIN_TOKEN", "").strip()
+    supplied = str(body.get("admin_token", "")).strip()
+    if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+        raise PermissionError("يلزم إدخال مفتاح إدارة زيريوس الصحيح.")
+    if not os.environ.get("GITHUB_TOKEN", "").strip():
+        raise RuntimeError("لم يُضبط GITHUB_TOKEN على الخادم. أضف GitHub token بصلاحية Contents: Read and write.")
+    action = str(body.get("action", "")).lower().strip()
+    repo = str(body.get("repo", "")).strip()
+    path = str(body.get("path", "")).strip().lstrip("/")
+    message = str(body.get("message", "")).strip()[:200]
+    branch = str(body.get("branch", "")).strip()
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        raise ValueError("اسم المستودع يجب أن يكون owner/repo.")
+    if not path or path.startswith("../") or "/../" in path or path == "..":
+        raise ValueError("مسار الملف غير صالح.")
+    if not message:
+        message = {"create": "Create file via Zereos AI", "update": "Update file via Zereos AI", "delete": "Delete file via Zereos AI"}.get(action, "GitHub change via Zereos AI")
+    from urllib.parse import quote
+    api_path = f"/repos/{repo}/contents/{quote(path, safe='/')}"
+    if branch:
+        api_path += "?ref=" + quote(branch, safe="")
+    if action in ("create", "update"):
+        content = body.get("content")
+        if not isinstance(content, str):
+            raise ValueError("محتوى الملف يجب أن يكون نصًا.")
+        if len(content) > 500000:
+            raise ValueError("حجم الملف يتجاوز الحد المسموح (500 KB).")
+        payload = {"message": message, "content": __import__("base64").b64encode(content.encode("utf-8")).decode("ascii")}
+        if branch:
+            payload["branch"] = branch
+        if action == "update":
+            current = github_request(api_path)
+            if not current.get("sha"):
+                raise RuntimeError("لم يتم العثور على الملف الحالي.")
+            payload["sha"] = current["sha"]
+        result = github_request(api_path.split("?")[0], "PUT", payload)
+        return {"ok": True, "action": action, "repo": repo, "path": path, "commit": result.get("commit", {}).get("sha"), "url": result.get("content", {}).get("html_url")}
+    if action == "delete":
+        if str(body.get("confirm", "")).strip() != "DELETE":
+            raise ValueError("لحذف ملف، أرسل confirm=DELETE صراحةً.")
+        current = github_request(api_path)
+        payload = {"message": message, "sha": current["sha"]}
+        if branch:
+            payload["branch"] = branch
+        result = github_request(api_path.split("?")[0], "DELETE", payload)
+        return {"ok": True, "action": action, "repo": repo, "path": path, "commit": result.get("commit", {}).get("sha")}
+    raise ValueError("العملية المدعومة: create أو update أو delete.")
+
 
 def github_context_for_message(message):
     """Fetch bounded, read-only repository context when the user explicitly asks about GitHub."""
@@ -195,7 +256,19 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        if urlsplit(self.path).path != "/api/chat":
+        request_path = urlsplit(self.path).path
+        if request_path == "/api/github/write":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                result = github_write_action(body)
+                self.send_json(200, result)
+            except PermissionError as e:
+                self.send_json(401, {"error": str(e)})
+            except Exception as e:
+                self.send_json(400, {"error": str(e)})
+            return
+        if request_path != "/api/chat":
             self.send_json(404, {"error": "Not found"})
             return
         try:
