@@ -91,7 +91,21 @@ def github_context_for_message(message):
                 ] if isinstance(contents, list) else []
             except Exception:
                 result["root_files"] = []
-            return "\n\nGitHub repository context (read-only, retrieved live):\n" + json.dumps(result, ensure_ascii=False)[:11000]
+            file_match = re.search(r"github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/blob/([^/]+)/(.+?)(?:[?#].*)?$", text, re.I)
+            if file_match:
+                branch, file_path = file_match.group(1), file_match.group(2)
+                try:
+                    from urllib.parse import quote
+                    file_data = github_request(f"/repos/{owner}/{repo}/contents/{quote(file_path, safe='/')}?ref={quote(branch, safe='')}")
+                    if file_data.get("encoding") == "base64":
+                        import base64
+                        result["requested_file"] = {
+                            "path": file_path,
+                            "content": base64.b64decode(file_data.get("content", "")).decode("utf-8", errors="replace")[:12000]
+                        }
+                except Exception as exc:
+                    result["requested_file_error"] = type(exc).__name__
+            return "\n\nGitHub repository context (read-only, retrieved live):\n" + json.dumps(result, ensure_ascii=False)[:18000]
         if re.search(r"github|جيت\s*هاب", text, re.I) and re.search(r"ابحث|بحث|search|مستودع|مستودعات|repository|repositories", text, re.I):
             query = re.sub(r"(?is).*?(?:ابحث(?:\s+لي)?|بحث|search)\s+(?:في\s+)?(?:جيت\s*هاب|github)?\s*(?:عن|for)?\s*", "", text).strip()
             query = query[:180]
